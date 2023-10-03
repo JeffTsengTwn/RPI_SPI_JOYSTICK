@@ -1,4 +1,14 @@
-/*
+/************************************************************************
+ * License-Identifier: GPL-2.0 	    									
+ ************************************************************************
+ * Copyright (C) 2023 JeffZen-TW <jeff810123@gmail.com>
+ * 
+ * The project is a simple kernel driver for adc joystick and keyboard.
+ * And this project modify from two file in linux kernel after v6.5 as follow.
+ * 
+ ************************************************************************
+ * linux/drivers/iio/adc/mcp320x.c
+ ************************************************************************
  * Copyright (C) 2013 Oskar Andero <oskar.andero@gmail.com>
  * Copyright (C) 2014 Rose Technology
  * 	   Allan Bendorff Jensen <abj@rosetechnology.dk>
@@ -30,6 +40,27 @@
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
  * published by the Free Software Foundation.
+ *
+ * ************************************************************************
+ * linux/drivers/input/joystick/psxpad-spi.c
+ * ************************************************************************
+ * PlayStation 1/2 joypads via SPI interface Driver
+ *
+ * Copyright (C) 2017 Tomohiro Yoshidomi <sylph23k@gmail.com>
+ *
+ * PlayStation 1/2 joypad's plug (not socket)
+ *  123 456 789
+ * (...|...|...)
+ *
+ * 1: DAT -> MISO (pullup with 1k owm to 3.3V)
+ * 2: CMD -> MOSI
+ * 3: 9V (for motor, if not use N.C.)
+ * 4: GND
+ * 5: 3.3V
+ * 6: Attention -> CS(SS)
+ * 7: SCK -> SCK
+ * 8: N.C.
+ * 9: ACK -> N.C.
  */
 #if 1
   #define dprint(fmt,s...) printk("mcp3008_my: %s,%d:"fmt,__FUNCTION__,__LINE__,##s)
