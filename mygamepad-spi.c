@@ -72,8 +72,13 @@
 #include <linux/delay.h>
 #include <linux/spi/spi.h>
 #include <linux/module.h>
-#include <linux/iio/iio.h>
 #include <linux/regulator/consumer.h>
+#include <linux/kernel.h>
+#include <linux/device.h>
+#include <linux/input.h>
+#include <linux/types.h>
+#include <linux/pm.h>
+#include <linux/pm_runtime.h>
 
 enum {
 	mcp3001,
@@ -97,6 +102,7 @@ struct mcp320x {
 	struct spi_device *spi;
 	struct spi_message msg;
 	struct spi_transfer transfer[2];
+	struct input_dev *idev;
 
 	struct regulator *reg;
 	struct mutex lock;
@@ -105,6 +111,25 @@ struct mcp320x {
 	u8 tx_buf ____cacheline_aligned;
 	u8 rx_buf[2];
 };
+
+typedef enum adckey ADCKey;
+enum adckey {
+	S1,
+	S2,
+	S3,
+	S4,
+	S5,
+};
+
+typedef struct _point {
+	uint x;
+	uint y;
+} Point;
+
+typedef struct _mygamepad {
+	Point axisRaw;
+	ADCKey adcKey;
+} MyGamePad;
 
 static int mcp320x_channel_to_tx_data(int device_index,
 			const unsigned int channel, bool differential)
@@ -171,7 +196,7 @@ static int mcp320x_adc_conversion(struct mcp320x *adc, u8 channel,
 	}
 }
 
-#if 0
+
 static int mcp320x_read_raw(struct iio_dev *indio_dev,
 			    struct iio_chan_spec const *channel, int *val,
 			    int *val2, long mask)
@@ -213,7 +238,7 @@ out:
 
 	return ret;
 }
-#endif
+
 
 #define MCP320X_VOLTAGE_CHANNEL(num)				\
 	{							\
@@ -271,12 +296,6 @@ static const struct iio_chan_spec mcp3208_channels[] = {
 	MCP320X_VOLTAGE_CHANNEL_DIFF(3),
 };
 
-static const struct iio_info mcp320x_info = {
-	.read_raw = mcp320x_read_raw,
-};
-
-//indio_dev->info = &mcp320x_info;
-
 static const struct mcp320x_chip_info mcp320x_chip_infos[] = {
 	[mcp3001] = {
 		.channels = mcp3201_channels,
@@ -325,38 +344,80 @@ static const struct mcp320x_chip_info mcp320x_chip_infos[] = {
 	},
 };
 
+
+
+
+static void mygamepad_spi_poll(struct input_dev *input)
+{
+	struct psxpad *adc = input_get_drvdata(input);
+	u8 b_rsp3, b_rsp4;
+	int err;
+
+	psxpad_control_motor(pad, true, true);
+
+	memcpy(pad->sendbuf, PSX_CMD_POLL, sizeof(PSX_CMD_POLL));
+	pad->sendbuf[3] = pad->motor1enable ? pad->motor1level : 0x00;
+	pad->sendbuf[4] = pad->motor2enable ? pad->motor2level : 0x00;
+	err = psxpad_command(pad, sizeof(PSX_CMD_POLL));
+	if (err) {
+		dev_err(&pad->spi->dev,
+			"%s: poll command failed mode: %d\n", __func__, err);
+		return;
+	}
+
+
+	input_report_abs(input, ABS_X, REVERSE_BIT(pad->response[7]));
+	input_report_abs(input, ABS_Y, REVERSE_BIT(pad->response[8]));
+	input_report_key(input, BTN_X, b_rsp4 & BIT(3));
+	input_report_key(input, BTN_A, b_rsp4 & BIT(2));
+	input_report_key(input, BTN_B, b_rsp4 & BIT(1));
+	input_report_key(input, BTN_Y, b_rsp4 & BIT(0));
+		
+	input_sync(input);
+}
+
 static int mygamepad_probe(struct spi_device *spi)
 {
-	// struct iio_dev *indio_dev;
-
 	struct input_dev *idev;
-
 	struct mcp320x *adc;
 	const struct mcp320x_chip_info *chip_info;
 	int ret;
         
-
-/*  The resource managed devm_iio_device_alloc()/devm_iio_device_free()
-    to automatically clean up any allocations made by IIO drivers,
-    thus leading to simplified IIO drivers code.        
+/*  The resource managed devm_input_allocate_device()/devm_iio_device_free()
+    to automatically clean up any allocations made by Input drivers,
+    thus leading to simplified Input drivers code.        
 */
-	indio_dev = devm_iio_device_alloc(&spi->dev, sizeof(*adc));
-	if (!indio_dev)
+	idev = devm_input_allocate_device(&spi->dev);
+	if (!idev) {
+		dev_err(&spi->dev, "failed to allocate input device\n");
 		return -ENOMEM;
+	}
+	// adc = iio_priv(indio_dev);
 
-	adc = iio_priv(indio_dev);
+	adc = devm_kzalloc(&spi->dev, sizeof(struct mcp320x), GFP_KERNEL);
+
+	/* input poll device settings */
+	adc->idev = idev;
 	adc->spi = spi;
 
-	indio_dev->dev.parent = &spi->dev;
-	indio_dev->name = spi_get_device_id(spi)->name;
-        dprint("the name = %s\n",indio_dev->name);        
-	indio_dev->modes = INDIO_DIRECT_MODE;
-	indio_dev->info = &mcp320x_info;
+	/* input device settings */
+	input_set_drvdata(idev, adc);
 
-	chip_info = &mcp320x_chip_infos[spi_get_device_id(spi)->driver_data];
-        dprint("the index = %d\n",spi_get_device_id(spi)->driver_data);
-	indio_dev->channels = chip_info->channels;
-	indio_dev->num_channels = chip_info->num_channels;
+	idev->name = "MyGamePad";
+	idev->id.bustype = BUS_SPI;
+	// idev->open = mygamepad_spi_poll_open;
+	// idev->close = mygamepad_spi_poll_close;
+
+	/* key/value map settings */
+	input_set_abs_params(idev, ABS_X, 0, 255, 0, 0);
+	input_set_abs_params(idev, ABS_Y, 0, 255, 0, 0);
+	input_set_capability(idev, EV_KEY, BTN_A);
+	input_set_capability(idev, EV_KEY, BTN_B);
+	input_set_capability(idev, EV_KEY, BTN_X);
+	input_set_capability(idev, EV_KEY, BTN_Y);
+
+	chip_info = &mcp320x_chip_infos[mcp3008];
+    dprint("the index = %d\n",mcp3008);
 
 	adc->chip_info = chip_info;
 
@@ -378,11 +439,26 @@ static int mygamepad_probe(struct spi_device *spi)
 
 	mutex_init(&adc->lock);
 
-	ret = iio_device_register(indio_dev);
-	if (ret < 0)
+	err = input_setup_polling(idev, psxpad_spi_poll);
+	if (err) {
+		dev_err(&spi->dev, "failed to set up polling: %d\n", err);
+		return err;
+	}
+
+	/* poll interval is about 60fps */
+	input_set_poll_interval(idev, 16);
+	input_set_min_poll_interval(idev, 8);
+	input_set_max_poll_interval(idev, 32);
+
+	/* register input poll device */
+	ret = input_register_device(idev);
+	if (ret) {
+		dev_err(&spi->dev,
+			"failed to register input device: %d\n", ret);
 		goto reg_disable;
+	}
         
-        dprint("success\n");
+    dprint("success\n");
 	return 0;
 
 reg_disable:
@@ -391,18 +467,18 @@ reg_disable:
 	return ret;
 }
 
-static int mcp320x_remove(struct spi_device *spi)
+static int mygamepad_remove(struct input_dev *input)
 {
-	struct iio_dev *indio_dev = spi_get_drvdata(spi);
-	struct mcp320x *adc = iio_priv(indio_dev);
 
-	iio_device_unregister(indio_dev);
+	struct mcp320x *adc = input_get_drvdata(input);
+
+	input_unregister_device (input);
 	regulator_disable(adc->reg);
 
 	return 0;
 }
 
-#if defined(CONFIG_OF)
+#if 0
 static const struct of_device_id mcp320x_dt_ids[] = {
 	{
 		.compatible = "mcp3001",
@@ -435,6 +511,16 @@ static const struct of_device_id mcp320x_dt_ids[] = {
 	}
 };
 MODULE_DEVICE_TABLE(of, mcp320x_dt_ids);
+#else
+static const struct of_device_id mcp320x_dt_ids[] = {
+	{
+		.compatible = "mygamepad-spi",
+		.data = &mcp320x_chip_infos[mcp3008],
+	}, {
+
+	}
+};
+MODULE_DEVICE_TABLE(of, mcp320x_dt_ids);
 #endif
 
 //name , driver_data
@@ -454,7 +540,7 @@ static const struct spi_device_id mcp320x_id[] = {
 #endif
 
 static const struct spi_device_id mygamepad_id[] = {
-	{ "mygamepad-spi", 0 },
+	{ "mygamepad-spi", mcp3008 },
 	{ }
 };
 
@@ -466,11 +552,11 @@ static struct spi_driver mygamepad_spi_driver = {
 		.of_match_table = of_match_ptr(mcp320x_dt_ids),
 	},
 	.probe = mygamepad_probe,
-	.remove = mcp320x_remove,
+	.remove = mygamepad_remove,
 	.id_table = mygamepad_id,
 };
 module_spi_driver(mygamepad_spi_driver);
 
-MODULE_AUTHOR("Oskar Andero <oskar.andero@gmail.com>");
-MODULE_DESCRIPTION("Microchip Technology MCP3x01/02/04/08");
+MODULE_AUTHOR("JeffZen-TW <jeff810123@gmail.com>");
+MODULE_DESCRIPTION("MyGamePad");
 MODULE_LICENSE("GPL v2");
