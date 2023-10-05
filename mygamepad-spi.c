@@ -103,7 +103,7 @@ struct mcp320x {
 	struct spi_message msg;
 	struct spi_transfer transfer[2];
 	struct input_dev *idev;
-
+	int    device_index;
 	struct regulator *reg;
 	struct mutex lock;
 	const struct mcp320x_chip_info *chip_info;
@@ -112,24 +112,24 @@ struct mcp320x {
 	u8 rx_buf[2];
 };
 
-typedef enum adckey ADCKey;
-enum adckey {
-	S1,
-	S2,
-	S3,
-	S4,
-	S5,
-};
+// typedef enum adckey ADCKey;
+// enum adckey {
+// 	S1,
+// 	S2,
+// 	S3,
+// 	S4,
+// 	S5,
+// };
 
-typedef struct _point {
-	uint x;
-	uint y;
-} Point;
+// typedef struct _point {
+// 	uint x;
+// 	uint y;
+// } Point;
 
-typedef struct _mygamepad {
-	Point axisRaw;
-	ADCKey adcKey;
-} MyGamePad;
+// typedef struct _mygamepad {
+// 	Point axisRaw;
+// 	ADCKey adcKey;
+// } MyGamePad;
 
 static int mcp320x_channel_to_tx_data(int device_index,
 			const unsigned int channel, bool differential)
@@ -197,41 +197,23 @@ static int mcp320x_adc_conversion(struct mcp320x *adc, u8 channel,
 }
 
 
-static int mcp320x_read_raw(struct iio_dev *indio_dev,
-			    struct iio_chan_spec const *channel, int *val,
-			    int *val2, long mask)
+static int mcp320x_read_raw(struct input_dev *input,
+			    struct iio_chan_spec const *channel, int *val)
 {
-	struct mcp320x *adc = iio_priv(indio_dev);
+	struct mcp320x *adc = input_get_drvdata(input);
 	int ret = -EINVAL;
-	int device_index = 0;
+	int device_index = adc->device_index;
 
 	mutex_lock(&adc->lock);
 
-	device_index = spi_get_device_id(adc->spi)->driver_data;
+	ret = mcp320x_adc_conversion(adc, channel->address,
+		channel->differential, device_index);
 
-	switch (mask) {
-	case IIO_CHAN_INFO_RAW:
-		ret = mcp320x_adc_conversion(adc, channel->address,
-			channel->differential, device_index);
+	if (ret < 0)
+		goto out;
 
-		if (ret < 0)
-			goto out;
-
-		*val = ret;
-		ret = IIO_VAL_INT;
-		break;
-
-	case IIO_CHAN_INFO_SCALE:
-		ret = regulator_get_voltage(adc->reg);
-		if (ret < 0)
-			goto out;
-
-		/* convert regulator output voltage to mV */
-		*val = ret / 1000;
-		*val2 = adc->chip_info->resolution;
-		ret = IIO_VAL_FRACTIONAL_LOG2;
-		break;
-	}
+	*val = ret;
+	ret = IIO_VAL_INT;
 
 out:
 	mutex_unlock(&adc->lock);
@@ -349,16 +331,13 @@ static const struct mcp320x_chip_info mcp320x_chip_infos[] = {
 
 static void mygamepad_spi_poll(struct input_dev *input)
 {
-	struct psxpad *adc = input_get_drvdata(input);
+	struct mcp320x *adc = input_get_drvdata(input);
 	u8 b_rsp3, b_rsp4;
 	int err;
 
-	psxpad_control_motor(pad, true, true);
+	int x,y
 
-	memcpy(pad->sendbuf, PSX_CMD_POLL, sizeof(PSX_CMD_POLL));
-	pad->sendbuf[3] = pad->motor1enable ? pad->motor1level : 0x00;
-	pad->sendbuf[4] = pad->motor2enable ? pad->motor2level : 0x00;
-	err = psxpad_command(pad, sizeof(PSX_CMD_POLL));
+	err = mcp320x_read_raw(input)
 	if (err) {
 		dev_err(&pad->spi->dev,
 			"%s: poll command failed mode: %d\n", __func__, err);
@@ -392,7 +371,6 @@ static int mygamepad_probe(struct spi_device *spi)
 		dev_err(&spi->dev, "failed to allocate input device\n");
 		return -ENOMEM;
 	}
-	// adc = iio_priv(indio_dev);
 
 	adc = devm_kzalloc(&spi->dev, sizeof(struct mcp320x), GFP_KERNEL);
 
@@ -419,6 +397,7 @@ static int mygamepad_probe(struct spi_device *spi)
 	chip_info = &mcp320x_chip_infos[mcp3008];
     dprint("the index = %d\n",mcp3008);
 
+	adc->device_id = mcp3008;
 	adc->chip_info = chip_info;
 
 	adc->transfer[0].tx_buf = &adc->tx_buf;
@@ -439,7 +418,7 @@ static int mygamepad_probe(struct spi_device *spi)
 
 	mutex_init(&adc->lock);
 
-	err = input_setup_polling(idev, psxpad_spi_poll);
+	err = input_setup_polling(idev, mygamepad_spi_poll);
 	if (err) {
 		dev_err(&spi->dev, "failed to set up polling: %d\n", err);
 		return err;
