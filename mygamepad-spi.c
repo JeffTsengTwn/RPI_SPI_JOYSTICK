@@ -72,7 +72,8 @@
 #include <linux/delay.h>
 #include <linux/spi/spi.h>
 #include <linux/module.h>
-#include <linux/regulator/consumer.h>
+#include <linux/iio/iio.h>
+ #include <linux/regulator/consumer.h>
 #include <linux/kernel.h>
 #include <linux/device.h>
 #include <linux/input.h>
@@ -111,25 +112,6 @@ struct mcp320x {
 	u8 tx_buf ____cacheline_aligned;
 	u8 rx_buf[2];
 };
-
-// typedef enum adckey ADCKey;
-// enum adckey {
-// 	S1,
-// 	S2,
-// 	S3,
-// 	S4,
-// 	S5,
-// };
-
-// typedef struct _point {
-// 	uint x;
-// 	uint y;
-// } Point;
-
-// typedef struct _mygamepad {
-// 	Point axisRaw;
-// 	ADCKey adcKey;
-// } MyGamePad;
 
 static int mcp320x_channel_to_tx_data(int device_index,
 			const unsigned int channel, bool differential)
@@ -220,7 +202,6 @@ out:
 
 	return ret;
 }
-
 
 #define MCP320X_VOLTAGE_CHANNEL(num)				\
 	{							\
@@ -335,22 +316,30 @@ static void mygamepad_spi_poll(struct input_dev *input)
 	u8 b_rsp3, b_rsp4;
 	int err;
 
-	int x,y
+	int channelValue1;
+	int channelValue2;
 
-	err = mcp320x_read_raw(input)
+	err = mcp320x_read_raw(input, &(adc->chip_info->channels[1]), &channelValue1);
 	if (err) {
-		dev_err(&pad->spi->dev,
+		dev_err(&adc->spi->dev,
+			"%s: poll command failed mode: %d\n", __func__, err);
+		return;
+	}
+
+	err = mcp320x_read_raw(input, &(adc->chip_info->channels[2]), &channelValue2);
+	if (err) {
+		dev_err(&adc->spi->dev,
 			"%s: poll command failed mode: %d\n", __func__, err);
 		return;
 	}
 
 
-	input_report_abs(input, ABS_X, REVERSE_BIT(pad->response[7]));
-	input_report_abs(input, ABS_Y, REVERSE_BIT(pad->response[8]));
-	input_report_key(input, BTN_X, b_rsp4 & BIT(3));
-	input_report_key(input, BTN_A, b_rsp4 & BIT(2));
-	input_report_key(input, BTN_B, b_rsp4 & BIT(1));
-	input_report_key(input, BTN_Y, b_rsp4 & BIT(0));
+	input_report_abs(input, ABS_X, channelValue1 % 256);
+	input_report_abs(input, ABS_Y, channelValue2 % 256);
+	// input_report_key(input, BTN_X, b_rsp4 & BIT(3));
+	// input_report_key(input, BTN_A, b_rsp4 & BIT(2));
+	// input_report_key(input, BTN_B, b_rsp4 & BIT(1));
+	// input_report_key(input, BTN_Y, b_rsp4 & BIT(0));
 		
 	input_sync(input);
 }
@@ -389,15 +378,15 @@ static int mygamepad_probe(struct spi_device *spi)
 	/* key/value map settings */
 	input_set_abs_params(idev, ABS_X, 0, 255, 0, 0);
 	input_set_abs_params(idev, ABS_Y, 0, 255, 0, 0);
-	input_set_capability(idev, EV_KEY, BTN_A);
-	input_set_capability(idev, EV_KEY, BTN_B);
-	input_set_capability(idev, EV_KEY, BTN_X);
-	input_set_capability(idev, EV_KEY, BTN_Y);
+	// input_set_capability(idev, EV_KEY, BTN_A);
+	// input_set_capability(idev, EV_KEY, BTN_B);
+	// input_set_capability(idev, EV_KEY, BTN_X);
+	// input_set_capability(idev, EV_KEY, BTN_Y);
 
 	chip_info = &mcp320x_chip_infos[mcp3008];
     dprint("the index = %d\n",mcp3008);
 
-	adc->device_id = mcp3008;
+	adc->device_index = mcp3008;
 	adc->chip_info = chip_info;
 
 	adc->transfer[0].tx_buf = &adc->tx_buf;
@@ -418,10 +407,10 @@ static int mygamepad_probe(struct spi_device *spi)
 
 	mutex_init(&adc->lock);
 
-	err = input_setup_polling(idev, mygamepad_spi_poll);
-	if (err) {
-		dev_err(&spi->dev, "failed to set up polling: %d\n", err);
-		return err;
+	ret = input_setup_polling(idev, mygamepad_spi_poll);
+	if (ret) {
+		dev_err(&spi->dev, "failed to set up polling: %d\n", ret);
+		return ret;
 	}
 
 	/* poll interval is about 60fps */
@@ -434,19 +423,19 @@ static int mygamepad_probe(struct spi_device *spi)
 	if (ret) {
 		dev_err(&spi->dev,
 			"failed to register input device: %d\n", ret);
-		goto reg_disable;
+		goto failed;
 	}
         
     dprint("success\n");
 	return 0;
 
-reg_disable:
-	regulator_disable(adc->reg);
+failed:
+	/* regulator_disable(adc->reg); */
 
 	return ret;
 }
 
-static int mygamepad_remove(struct input_dev *input)
+/* static int mygamepad_remove(struct input_dev *input)
 {
 
 	struct mcp320x *adc = input_get_drvdata(input);
@@ -455,7 +444,7 @@ static int mygamepad_remove(struct input_dev *input)
 	regulator_disable(adc->reg);
 
 	return 0;
-}
+} */
 
 #if 0
 static const struct of_device_id mcp320x_dt_ids[] = {
@@ -531,7 +520,7 @@ static struct spi_driver mygamepad_spi_driver = {
 		.of_match_table = of_match_ptr(mcp320x_dt_ids),
 	},
 	.probe = mygamepad_probe,
-	.remove = mygamepad_remove,
+	/* .remove = mygamepad_remove, */
 	.id_table = mygamepad_id,
 };
 module_spi_driver(mygamepad_spi_driver);
