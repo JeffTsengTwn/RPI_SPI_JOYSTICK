@@ -482,7 +482,7 @@ MODULE_DEVICE_TABLE(of, mcp320x_dt_ids);
 #else
 static const struct of_device_id mcp320x_dt_ids[] = {
 	{
-		.compatible = "mygamepad-spi",
+		.compatible = "mygamepad",
 		.data = &mcp320x_chip_infos[mcp3008],
 	}, {
 
@@ -508,7 +508,7 @@ static const struct spi_device_id mcp320x_id[] = {
 #endif
 
 static const struct spi_device_id mygamepad_id[] = {
-	{ "mygamepad-spi", mcp3008 },
+	{ "mygamepad", mcp3008 },
 	{ }
 };
 
