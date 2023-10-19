@@ -350,6 +350,8 @@ static int mygamepad_probe(struct spi_device *spi)
 	struct mcp320x *adc;
 	const struct mcp320x_chip_info *chip_info;
 	int ret;
+
+	dprint("Load module");
         
 /*  The resource managed devm_input_allocate_device()/devm_iio_device_free()
     to automatically clean up any allocations made by Input drivers,
@@ -435,80 +437,21 @@ failed:
 	return ret;
 }
 
-/* static int mygamepad_remove(struct input_dev *input)
-{
-
-	struct mcp320x *adc = input_get_drvdata(input);
-
-	input_unregister_device (input);
-	regulator_disable(adc->reg);
-
+static int mygamepad_remove(struct spi_device *spi) {
+	dprint("Remove module");
 	return 0;
-} */
+}
 
-#if 0
+
 static const struct of_device_id mcp320x_dt_ids[] = {
 	{
-		.compatible = "mcp3001",
-		.data = &mcp320x_chip_infos[mcp3001],
-	}, {
-		.compatible = "mcp3002",
-		.data = &mcp320x_chip_infos[mcp3002],
-	}, {
-		.compatible = "mcp3004",
-		.data = &mcp320x_chip_infos[mcp3004],
-	}, {
-		.compatible = "mcp3008",
-		.data = &mcp320x_chip_infos[mcp3008],
-	}, {
-		.compatible = "mcp3201",
-		.data = &mcp320x_chip_infos[mcp3201],
-	}, {
-		.compatible = "mcp3202",
-		.data = &mcp320x_chip_infos[mcp3202],
-	}, {
-		.compatible = "mcp3204",
-		.data = &mcp320x_chip_infos[mcp3204],
-	}, {
-		.compatible = "mcp3208",
-		.data = &mcp320x_chip_infos[mcp3208],
-	}, {
-		.compatible = "mcp3301",
-		.data = &mcp320x_chip_infos[mcp3301],
-	}, {
-	}
+		.compatible = "mygamepad"
+	}, {}
 };
 MODULE_DEVICE_TABLE(of, mcp320x_dt_ids);
-#else
-static const struct of_device_id mcp320x_dt_ids[] = {
-	{
-		.compatible = "mygamepad",
-		.data = &mcp320x_chip_infos[mcp3008],
-	}, {
-
-	}
-};
-MODULE_DEVICE_TABLE(of, mcp320x_dt_ids);
-#endif
-
-//name , driver_data
-#if 0
-static const struct spi_device_id mcp320x_id[] = {
-	{ "mcp3001", mcp3001 },
-	{ "mcp3002", mcp3002 },
-	{ "mcp3004", mcp3004 },
-	{ "mcp3008", mcp3008 },
-	{ "mcp3201", mcp3201 },
-	{ "mcp3202", mcp3202 },
-	{ "mcp3204", mcp3204 },
-	{ "mcp3208", mcp3208 },
-	{ "mcp3301", mcp3301 },
-	{ }
-};
-#endif
 
 static const struct spi_device_id mygamepad_id[] = {
-	{ "mygamepad", mcp3008 },
+	{ "mygamepad", 0 },
 	{ }
 };
 
@@ -520,7 +463,7 @@ static struct spi_driver mygamepad_spi_driver = {
 		.of_match_table = of_match_ptr(mcp320x_dt_ids),
 	},
 	.probe = mygamepad_probe,
-	/* .remove = mygamepad_remove, */
+	.remove = mygamepad_remove,
 	.id_table = mygamepad_id,
 };
 module_spi_driver(mygamepad_spi_driver);
